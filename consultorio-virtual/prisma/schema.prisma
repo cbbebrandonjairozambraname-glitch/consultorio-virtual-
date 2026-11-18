@@ -1,0 +1,222 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  DOCTOR
+  RECEPTION
+  PATIENT
+}
+
+enum Sex {
+  F
+  M
+  O
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum EncounterStatus {
+  DRAFT
+  SIGNED
+}
+
+enum DiagnosisType {
+  PRIMARY
+  SECONDARY
+}
+
+enum OrderType {
+  LAB
+  IMAGING
+  REFERRAL
+  OTHER
+}
+
+enum OrderPriority {
+  ROUTINE
+  URGENT
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role
+  active       Boolean   @default(true)
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  specialist Specialist?
+  patient    Patient?
+  auditLogs  AuditLog[]
+}
+
+model Specialist {
+  id            String @id @default(cuid())
+  userId        String @unique
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialty     String
+  licenseNumber String
+  slotMinutes   Int    @default(30)
+  workDays      Int[] // 0 = domingo ... 6 = sábado
+  startHour     Int    @default(8)
+  endHour       Int    @default(17)
+
+  appointments Appointment[]
+  encounters   Encounter[]
+}
+
+model Patient {
+  id         String   @id @default(cuid())
+  userId     String?  @unique
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  documentId String   @unique
+  firstName  String
+  lastName   String
+  birthDate  DateTime @db.Date
+  sex        Sex
+  phone      String?
+  email      String?
+  address    String?
+  allergies  String?
+  insurance  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  appointments Appointment[]
+  encounters   Encounter[]
+
+  @@index([lastName, firstName])
+}
+
+model Appointment {
+  id           String            @id @default(cuid())
+  patientId    String
+  patient      Patient           @relation(fields: [patientId], references: [id])
+  specialistId String
+  specialist   Specialist        @relation(fields: [specialistId], references: [id])
+  startsAt     DateTime
+  endsAt       DateTime
+  reason       String
+  status       AppointmentStatus @default(SCHEDULED)
+  roomName     String            @unique
+  checkedInAt  DateTime?
+  startedAt    DateTime?
+  endedAt      DateTime?
+  cancelReason String?
+  createdById  String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  encounter Encounter?
+
+  @@index([specialistId, startsAt])
+  @@index([patientId, startsAt])
+  @@index([status])
+}
+
+model Encounter {
+  id            String          @id @default(cuid())
+  appointmentId String          @unique
+  appointment   Appointment     @relation(fields: [appointmentId], references: [id])
+  patientId     String
+  patient       Patient         @relation(fields: [patientId], references: [id])
+  specialistId  String
+  specialist    Specialist      @relation(fields: [specialistId], references: [id])
+  subjective    String          @default("") @db.Text
+  objective     String          @default("") @db.Text
+  assessment    String          @default("") @db.Text
+  plan          String          @default("") @db.Text
+  vitals        Json            @default("{}")
+  status        EncounterStatus @default(DRAFT)
+  signedAt      DateTime?
+  addenda       Json            @default("[]")
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  diagnoses     Diagnosis[]
+  prescriptions PrescriptionItem[]
+  orders        MedicalOrder[]
+
+  @@index([patientId, createdAt])
+}
+
+model Cie10 {
+  code        String      @id
+  description String
+  diagnoses   Diagnosis[]
+
+  @@index([description])
+}
+
+model Diagnosis {
+  id          String        @id @default(cuid())
+  encounterId String
+  encounter   Encounter     @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  cie10Code   String
+  cie10       Cie10         @relation(fields: [cie10Code], references: [code])
+  type        DiagnosisType
+  notes       String?
+
+  @@index([encounterId])
+}
+
+model PrescriptionItem {
+  id           String    @id @default(cuid())
+  encounterId  String
+  encounter    Encounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  medication   String
+  dose         String
+  frequency    String
+  duration     String
+  instructions String?
+
+  @@index([encounterId])
+}
+
+model MedicalOrder {
+  id          String        @id @default(cuid())
+  encounterId String
+  encounter   Encounter     @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  type        OrderType
+  description String
+  priority    OrderPriority @default(ROUTINE)
+
+  @@index([encounterId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String?
+  entityId  String?
+  metadata  Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([entity, entityId])
+}
